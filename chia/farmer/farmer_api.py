@@ -45,13 +45,13 @@ class FarmerAPI:
                 f"Surpassed {max_pos_per_sp} PoSpace for one SP, no longer submitting PoSpace for signage point "
                 f"{new_proof_of_space.sp_hash}"
             )
-            return None
+            return
 
         if new_proof_of_space.sp_hash not in self.farmer.sps:
             self.farmer.log.warning(
                 f"Received response for a signage point that we do not have {new_proof_of_space.sp_hash}"
             )
-            return None
+            return
 
         sps = self.farmer.sps[new_proof_of_space.sp_hash]
         for sp in sps:
@@ -62,7 +62,7 @@ class FarmerAPI:
             )
             if computed_quality_string is None:
                 self.farmer.log.error(f"Invalid proof of space {new_proof_of_space.proof}")
-                return None
+                return
 
             self.farmer.number_of_responses[new_proof_of_space.sp_hash] += 1
 
@@ -116,7 +116,7 @@ class FarmerAPI:
         """
         if response.sp_hash not in self.farmer.sps:
             self.farmer.log.warning(f"Do not have challenge hash {response.challenge_hash}")
-            return None
+            return
         is_sp_signatures: bool = False
         sps = self.farmer.sps[response.sp_hash]
         signage_point_index = sps[0].signage_point_index
@@ -140,7 +140,7 @@ class FarmerAPI:
         )
         if computed_quality_string is None:
             self.farmer.log.warning(f"Have invalid PoSpace {pospace}")
-            return None
+            return
 
         if is_sp_signatures:
             (
@@ -169,7 +169,7 @@ class FarmerAPI:
                             self.farmer.log.error(
                                 f"Don't have the private key for the pool key used by harvester: {pool_pk.hex()}"
                             )
-                            return None
+                            return
 
                         pool_target: Optional[PoolTarget] = PoolTarget(self.farmer.pool_target, uint32(0))
                         assert pool_target is not None
@@ -196,7 +196,7 @@ class FarmerAPI:
                     self.farmer.state_changed("proof", {"proof": request, "passed_filter": True})
                     msg = make_msg(ProtocolMessageTypes.declare_proof_of_space, request)
                     await self.farmer.server.send_to_all([msg], NodeType.FULL_NODE)
-                    return None
+                    return
 
         else:
             # This is a response with block signatures
@@ -249,10 +249,6 @@ class FarmerAPI:
         await self.farmer.server.send_to_all([msg], NodeType.HARVESTER)
         if new_signage_point.challenge_chain_sp not in self.farmer.sps:
             self.farmer.sps[new_signage_point.challenge_chain_sp] = []
-        if new_signage_point in self.farmer.sps[new_signage_point.challenge_chain_sp]:
-            self.farmer.log.debug(f"Duplicate signage point {new_signage_point.signage_point_index}")
-            return
-
         self.farmer.sps[new_signage_point.challenge_chain_sp].append(new_signage_point)
         self.farmer.cache_add_time[new_signage_point.challenge_chain_sp] = uint64(int(time.time()))
         self.farmer.state_changed("new_signage_point", {"sp_hash": new_signage_point.challenge_chain_sp})
@@ -261,7 +257,7 @@ class FarmerAPI:
     async def request_signed_values(self, full_node_request: farmer_protocol.RequestSignedValues):
         if full_node_request.quality_string not in self.farmer.quality_str_to_identifiers:
             self.farmer.log.error(f"Do not have quality string {full_node_request.quality_string}")
-            return None
+            return
 
         (plot_identifier, challenge_hash, sp_hash, node_id) = self.farmer.quality_str_to_identifiers[
             full_node_request.quality_string
@@ -277,7 +273,8 @@ class FarmerAPI:
         await self.farmer.server.send_to_specific([msg], node_id)
 
     @api_request
-    async def farming_info(self, request: farmer_protocol.FarmingInfo):
+    @peer_required
+    async def farming_info(self, request: farmer_protocol.FarmingInfo, peer: ws.WSChiaConnection):
         self.farmer.state_changed(
             "new_farming_info",
             {
@@ -290,4 +287,9 @@ class FarmerAPI:
                     "timestamp": request.timestamp,
                 }
             },
+        )
+        self.farmer.log.info(
+            f"{request.passed} / {request.total_plots} plots eligible from "
+            f"{peer.peer_host} {peer.peer_node_id} Proofs: {request.proofs} "
+            f"Challenge: {request.challenge_hash} Signage Point: {request.sp_hash}"
         )
